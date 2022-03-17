@@ -8,6 +8,10 @@ import "hardhat/console.sol";
 
 error PleaseDepositTheGameFee();
 error CanNotPlayAgainstYourself();
+error YouCanNotJoinThisGame();
+error ThisGameHasAlreadyStarted();
+error YouHaveAlreadySetYourMove();
+error InvalidMove();
 
 contract RockScissorsPapers is Ownable {
     // constants to represent the moves
@@ -32,6 +36,9 @@ contract RockScissorsPapers is Ownable {
     // game fee
     uint256 private _gameFee = 1e1;
 
+    event PlayerJoinedGame(uint256 _gameId, address player);
+    event GameIsFinished(uint256 _gameId, address winner, address loser);
+
     struct Game {
         address player1;
         address player2;
@@ -42,7 +49,7 @@ contract RockScissorsPapers is Ownable {
         uint8 player2Move;
     }
 
-    Game[] public games;
+    Game[] private games;
 
     // setter to update the game fee if needed
     function setGameFee(uint256 _newGameFee) external onlyOwner {
@@ -82,5 +89,108 @@ contract RockScissorsPapers is Ownable {
         _gameIds.increment();
 
         return currentIndex;
+    }
+
+    modifier joinOnlyIfYouAreTheSecondPlayer(uint256 _gameId) {
+        if (
+            _gameId > _gameIds.current() || games[_gameId].player2 != msg.sender
+        ) {
+            revert YouCanNotJoinThisGame();
+        }
+        _;
+    }
+
+    modifier gameHasNotStarted(uint256 _gameId) {
+        if (
+            games[_gameId].playerState == PLAYER_2_JOINED ||
+            games[_gameId].gameState == DRAW ||
+            games[_gameId].gameState == PLAYER_ONE_WON ||
+            games[_gameId].gameState == PLAYER_TWO_WON
+        ) {
+            revert YouCanNotJoinThisGame();
+        }
+        _;
+    }
+
+    modifier canSetMove(uint256 _gameId) {
+        address _currentPlayer = msg.sender;
+        if (
+            games[_gameId].player1 == msg.sender &&
+            games[_gameId].player1Move != 0
+        ) {
+            revert YouHaveAlreadySetYourMove();
+        }
+        if (
+            games[_gameId].player2 == msg.sender &&
+            games[_gameId].player2Move != 0
+        ) {
+            revert YouHaveAlreadySetYourMove();
+        }
+        _;
+    }
+
+    modifier setOnlyValidMove(uint256 _move) {
+        if (_move < 1 && _move > 3) {
+            revert InvalidMove();
+        }
+        _;
+    }
+
+    // to join a game the user should have the right id from the person inviting him
+    function joinGame(uint256 _gameId)
+        external
+        payable
+        joinOnlyIfYouAreTheSecondPlayer(_gameId)
+        gameHasNotStarted(_gameId)
+        hasDepositedCorrectAmount
+    {
+        Game storage myGame = games[_gameId];
+        myGame.playerState = PLAYER_2_JOINED;
+        emit PlayerJoinedGame(_gameId, myGame.player2);
+    }
+
+    function setMove(uint256 _gameId, uint256 _move)
+        external
+        setOnlyValidMove(_move)
+        canSetMove(_gameId)
+    {
+        Game storage myGame = games[_gameId];
+
+        if (myGame.player1 == msg.sender) {
+            myGame.player1Move = uint8(_move);
+        } else if (myGame.player2 == msg.sender) {
+            myGame.player2Move = uint8(_move);
+        }
+
+        if (myGame.player1Move != 0 && myGame.player2Move != 0) {
+            _calculateWinner(_gameId);
+        }
+    }
+
+    function _calculateWinner(uint256 _gameId) internal {
+        Game storage myGame = games[_gameId];
+        if (myGame.player1Move == ROCK && myGame.player2Move == PAPER) {
+            myGame.gameState = PLAYER_ONE_WON;
+        } else if (myGame.player1Move == PAPER && myGame.player2Move == ROCK) {
+            myGame.gameState = PLAYER_TWO_WON;
+        } else if (
+            myGame.player1Move == PAPER && myGame.player2Move == SCISSORS
+        ) {
+            myGame.gameState = PLAYER_TWO_WON;
+        } else if (
+            myGame.player1Move == SCISSORS && myGame.player2Move == PAPER
+        ) {
+            myGame.gameState = PLAYER_ONE_WON;
+        } else if (
+            myGame.player1Move == ROCK && myGame.player2Move == SCISSORS
+        ) {
+            myGame.gameState = PLAYER_ONE_WON;
+        } else if (
+            myGame.player1Move == SCISSORS && myGame.player2Move == ROCK
+        ) {
+            myGame.gameState = PLAYER_TWO_WON;
+        } else if (myGame.player1Move == myGame.player2Move) {
+            myGame.gameState = DRAW;
+        }
     }
 }
