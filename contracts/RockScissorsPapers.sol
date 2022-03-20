@@ -6,12 +6,8 @@ import "@openzeppelin/contracts/utils/Counters.sol";
 
 import "hardhat/console.sol";
 
-error PleaseDepositTheGameFee();
-error CanNotPlayAgainstYourself();
-error YouCanNotJoinThisGame();
-error ThisGameHasAlreadyStarted();
-error YouHaveAlreadySetYourMove();
-error InvalidMove();
+error CanNotPerformThisAction(string _reason);
+
 
 contract RockScissorsPapers is Ownable {
     // constants to represent the moves
@@ -19,15 +15,13 @@ contract RockScissorsPapers is Ownable {
     uint8 public constant SCISSORS = 2;
     uint8 public constant PAPER = 3;
 
-    // constants to represent player status
-    uint8 public constant WAITING_PLAYER_2 = 0;
-    uint8 public constant PLAYER_2_JOINED = 1;
-
     // constants to represent game status
     uint8 public constant PENDING = 0;
-    uint8 public constant PLAYER_ONE_WON = 1;
-    uint8 public constant PLAYER_TWO_WON = 2;
-    uint8 public constant DRAW = 3;
+    uint8 public constant ACTIVE = 1;
+    uint8 public constant DROPPED = 2;
+    uint8 public constant PLAYER_ONE_WON = 3;
+    uint8 public constant PLAYER_TWO_WON = 4;
+    uint8 public constant TIE = 5;
 
     // counter to return the game id
     using Counters for Counters.Counter;
@@ -35,52 +29,60 @@ contract RockScissorsPapers is Ownable {
 
     // game fee
     uint256 private _gameFee = 1e1;
+    uint256 private _timeout = 120 seconds;
 
     event PlayerJoinedGame(uint256 _gameId, address player);
     event GameIsFinished(uint256 _gameId, address winner, address loser);
 
     struct Game {
+        uint256 id;
         address player1;
         address player2;
         uint32 timeStamp;
-        uint8 playerState;
         uint8 gameState;
         uint8 player1Move;
         uint8 player2Move;
     }
 
-    Game[] private games;
+    Game[] internal games;
+    mapping(address => uint256) private _usersGames;
 
     // setter to update the game fee if needed
     function setGameFee(uint256 _newGameFee) external onlyOwner {
         _gameFee = _newGameFee;
     }
 
+    function setTimeout(uint256 _newTimeout) external onlyOwner {
+        _timeout = _newTimeout;
+    }
+
     modifier hasDepositedCorrectAmount() {
         if (msg.value != _gameFee) {
-            revert PleaseDepositTheGameFee();
+            revert CanNotPerformThisAction(
+                "Please deposit the right fee to be able to start a game"
+            );
         }
         _;
     }
 
     // player one creates the game and decides the player he will play against
-    function enroll(address playerTwo)
+    function enroll(address payable playerTwo)
         external
         payable
         hasDepositedCorrectAmount
         returns (uint256)
     {
         if (msg.sender == playerTwo) {
-            revert CanNotPlayAgainstYourself();
+            revert CanNotPerformThisAction("You can not play against yourself");
         }
 
         uint256 currentIndex = _gameIds.current();
         games.push(
             Game(
+                currentIndex,
                 msg.sender,
                 playerTwo,
                 uint32(block.timestamp),
-                uint8(WAITING_PLAYER_2),
                 uint8(PENDING),
                 uint8(0),
                 uint8(0)
@@ -88,6 +90,8 @@ contract RockScissorsPapers is Ownable {
         );
         _gameIds.increment();
 
+        _usersGames[msg.sender]++;
+        _usersGames[playerTwo]++;
         return currentIndex;
     }
 
@@ -95,19 +99,7 @@ contract RockScissorsPapers is Ownable {
         if (
             _gameId > _gameIds.current() || games[_gameId].player2 != msg.sender
         ) {
-            revert YouCanNotJoinThisGame();
-        }
-        _;
-    }
-
-    modifier gameHasNotStarted(uint256 _gameId) {
-        if (
-            games[_gameId].playerState == PLAYER_2_JOINED ||
-            games[_gameId].gameState == DRAW ||
-            games[_gameId].gameState == PLAYER_ONE_WON ||
-            games[_gameId].gameState == PLAYER_TWO_WON
-        ) {
-            revert YouCanNotJoinThisGame();
+            revert CanNotPerformThisAction("You can not join this game");
         }
         _;
     }
@@ -118,20 +110,20 @@ contract RockScissorsPapers is Ownable {
             games[_gameId].player1 == msg.sender &&
             games[_gameId].player1Move != 0
         ) {
-            revert YouHaveAlreadySetYourMove();
+            revert CanNotPerformThisAction("You have already set your move");
         }
         if (
             games[_gameId].player2 == msg.sender &&
             games[_gameId].player2Move != 0
         ) {
-            revert YouHaveAlreadySetYourMove();
+            revert CanNotPerformThisAction("You have already set your move");
         }
         _;
     }
 
     modifier setOnlyValidMove(uint256 _move) {
         if (_move < 1 && _move > 3) {
-            revert InvalidMove();
+            revert CanNotPerformThisAction("Please set a valid move");
         }
         _;
     }
@@ -141,11 +133,10 @@ contract RockScissorsPapers is Ownable {
         external
         payable
         joinOnlyIfYouAreTheSecondPlayer(_gameId)
-        gameHasNotStarted(_gameId)
         hasDepositedCorrectAmount
     {
         Game storage myGame = games[_gameId];
-        myGame.playerState = PLAYER_2_JOINED;
+        myGame.gameState = ACTIVE;
         emit PlayerJoinedGame(_gameId, myGame.player2);
     }
 
@@ -169,28 +160,78 @@ contract RockScissorsPapers is Ownable {
 
     function _calculateWinner(uint256 _gameId) internal {
         Game storage myGame = games[_gameId];
+        uint8 whoOne;
         if (myGame.player1Move == ROCK && myGame.player2Move == PAPER) {
-            myGame.gameState = PLAYER_ONE_WON;
+            whoOne = PLAYER_ONE_WON;
         } else if (myGame.player1Move == PAPER && myGame.player2Move == ROCK) {
-            myGame.gameState = PLAYER_TWO_WON;
+            whoOne = PLAYER_TWO_WON;
         } else if (
             myGame.player1Move == PAPER && myGame.player2Move == SCISSORS
         ) {
-            myGame.gameState = PLAYER_TWO_WON;
+            whoOne = PLAYER_TWO_WON;
         } else if (
             myGame.player1Move == SCISSORS && myGame.player2Move == PAPER
         ) {
-            myGame.gameState = PLAYER_ONE_WON;
+            whoOne = PLAYER_ONE_WON;
         } else if (
             myGame.player1Move == ROCK && myGame.player2Move == SCISSORS
         ) {
-            myGame.gameState = PLAYER_ONE_WON;
+            whoOne = PLAYER_ONE_WON;
         } else if (
             myGame.player1Move == SCISSORS && myGame.player2Move == ROCK
         ) {
-            myGame.gameState = PLAYER_TWO_WON;
+            whoOne = PLAYER_TWO_WON;
         } else if (myGame.player1Move == myGame.player2Move) {
-            myGame.gameState = DRAW;
+            whoOne = TIE;
         }
+
+        myGame.gameState = whoOne;
+
+        if (whoOne == PLAYER_ONE_WON) {
+            payable(myGame.player1).transfer(_gameFee * 2);
+        } else if (whoOne == PLAYER_TWO_WON) {
+            payable(myGame.player2).transfer(_gameFee * 2);
+        } else if (whoOne == TIE) {
+            payable(myGame.player1).transfer(_gameFee);
+            payable(myGame.player2).transfer(_gameFee);
+        }
+    }
+
+    function myGames() external view returns (Game[] memory) {
+        Game[] memory allGames = new Game[](_usersGames[msg.sender]);
+        uint256 _index = 0;
+        for (uint256 i = 0; i < games.length; i++) {
+            if (
+                games[i].player1 == msg.sender || games[i].player2 == msg.sender
+            ) {
+                allGames[_index] = games[i];
+                _index++;
+            }
+        }
+        return allGames;
+    }
+
+    modifier canClaimRefund(uint256 _gameId) {
+        if (games[_gameId].player1 == msg.sender) {
+            if (block.timestamp - games[_gameId].timeStamp >= _timeout) {
+                revert CanNotPerformThisAction(
+                    "Cannot claim reward before 2 minutes of inacticity"
+                );
+            }
+            if (ACTIVE == games[_gameId].gameState) {
+                revert CanNotPerformThisAction(
+                    "Player 2 has joined. Please make your move"
+                );
+            }
+        } else {
+            revert CanNotPerformThisAction("This is not your game");
+        }
+        _;
+    }
+
+    // function to retireve funds in case the game didint go forward for whatever reason
+    function claimRefund(uint256 _gameId) external canClaimRefund(_gameId) {
+        payable(msg.sender).transfer(_gameFee);
+        games[_gameId].gameState = DROPPED;
     }
 }
