@@ -47,15 +47,15 @@ describe("RockScissorsPapers", function () {
         var games = await rockScissorsPapers.connect(owner).callStatic.myGames();
 
         // Try to join an existing game but reverts because of lack of funds
-        await expect(rockScissorsPapers.connect(playAgainst).joinGame(games[0].id,  {
+        await expect(rockScissorsPapers.connect(playAgainst).joinGame(games[0].id, {
             value: ethers.utils.parseUnits("0.1", 1)
         })).to.be.reverted;
 
         // Join an existing game
-        await expect(rockScissorsPapers.connect(playAgainst).joinGame(games[0].id,  {
+        await expect(rockScissorsPapers.connect(playAgainst).joinGame(games[0].id, {
             value: ethers.utils.parseUnits("1", 1)
-        })) .to.emit(rockScissorsPapers, 'PlayerJoinedGame')
-        .withArgs(games[0].id,games[0].player2);
+        })).to.emit(rockScissorsPapers, 'PlayerJoinedGame')
+            .withArgs(games[0].id, games[0].player2);
 
         games = await rockScissorsPapers.connect(owner).callStatic.myGames();
         expect(games[0].gameState).to.equal(1);
@@ -63,8 +63,8 @@ describe("RockScissorsPapers", function () {
 
     it("Set move and calculate winnder", async function () {
         const [owner, playAgainst] = await hre.ethers.getSigners();
-        console.log( ethers.utils.formatUnits(await owner.getBalance()));
-        console.log( ethers.utils.formatUnits(await playAgainst.getBalance()));
+        console.log(ethers.utils.formatUnits(await owner.getBalance()));
+        console.log(ethers.utils.formatUnits(await playAgainst.getBalance()));
 
         const RockScissorsPapers = await ethers.getContractFactory("RockScissorsPapers");
         const rockScissorsPapers = await RockScissorsPapers.deploy();
@@ -77,10 +77,10 @@ describe("RockScissorsPapers", function () {
         var games = await rockScissorsPapers.connect(owner).callStatic.myGames();
 
         // Join an existing game
-        await expect(rockScissorsPapers.connect(playAgainst).joinGame(games[0].id,  {
+        await expect(rockScissorsPapers.connect(playAgainst).joinGame(games[0].id, {
             value: ethers.utils.parseUnits("1", 1)
-        })) .to.emit(rockScissorsPapers, 'PlayerJoinedGame')
-        .withArgs(games[0].id,games[0].player2);
+        })).to.emit(rockScissorsPapers, 'PlayerJoinedGame')
+            .withArgs(games[0].id, games[0].player2);
 
         await rockScissorsPapers.connect(owner).setMove(games[0].id, 1);
         await rockScissorsPapers.connect(playAgainst).setMove(games[0].id, 2);
